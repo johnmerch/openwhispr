@@ -15,6 +15,7 @@ import { shouldSkipTranscriptionApiKey } from "./transcriptionAuth";
 import { detectAgentName } from "../config/agentDetection";
 import { resolvePrompt } from "../config/prompts";
 import { syncService } from "../services/SyncService.js";
+import { stripActivationPhrases } from "../utils/activationPhraseFilter";
 
 const REASONING_CACHE_TTL = 30000; // 30 seconds
 const REALTIME_MODELS = new Set(["gpt-4o-mini-transcribe", "gpt-4o-transcribe"]);
@@ -2252,9 +2253,9 @@ registerProcessor("pcm-streaming-processor", PCMStreamingProcessor);
         // text = accumulated final text from streaming provider.
         // Extract just the new segment (delta from previous accumulated final).
         const prevLen = this.streamingFinalText.length;
-        this.streamingFinalText = text;
+        this.streamingFinalText = stripActivationPhrases(text);
         this.streamingPartialText = "";
-        const newSegment = text.slice(prevLen);
+        const newSegment = this.streamingFinalText.slice(prevLen);
         if (newSegment) {
           this.onStreamingCommit?.(newSegment);
         }
@@ -2281,7 +2282,7 @@ registerProcessor("pcm-streaming-processor", PCMStreamingProcessor);
       const sessionEndCleanup = provider.onSessionEnd((data) => {
         logger.debug("Streaming session ended", data, "streaming");
         if (data.text) {
-          this.streamingFinalText = data.text;
+          this.streamingFinalText = stripActivationPhrases(data.text);
         }
       });
 
@@ -2488,12 +2489,12 @@ registerProcessor("pcm-streaming-processor", PCMStreamingProcessor);
     finalText = this.streamingFinalText || "";
 
     if (!finalText && this.streamingPartialText) {
-      finalText = this.streamingPartialText;
+      finalText = stripActivationPhrases(this.streamingPartialText);
       logger.debug("Using partial text as fallback", { textLength: finalText.length }, "streaming");
     }
 
     if (!finalText && stopResult?.text) {
-      finalText = stopResult.text;
+      finalText = stripActivationPhrases(stopResult.text);
       logger.debug(
         "Using disconnect result text as fallback",
         { textLength: finalText.length },
@@ -2632,6 +2633,7 @@ registerProcessor("pcm-streaming-processor", PCMStreamingProcessor);
     }
 
     if (finalText) {
+      finalText = stripActivationPhrases(finalText);
       const tBeforePaste = performance.now();
       const clientTotalMs = Math.round(tBeforePaste - t0);
       this.lastAudioMetadata = {

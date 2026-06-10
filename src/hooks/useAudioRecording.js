@@ -6,6 +6,7 @@ import { playStartCue, playStopCue } from "../utils/dictationCues";
 import { getSettings } from "../stores/settingsStore";
 import { getRecordingErrorTitle, getRecordingErrorDescription } from "../utils/recordingErrors";
 import { isAccessibilitySkipped } from "../utils/permissions";
+import { stripActivationPhrases } from "../utils/activationPhraseFilter";
 
 export const useAudioRecording = (toast, options = {}) => {
   const { t } = useTranslation();
@@ -112,7 +113,7 @@ export const useAudioRecording = (toast, options = {}) => {
         }
       },
       onPartialTranscript: (text) => {
-        setPartialTranscript(text);
+        setPartialTranscript(stripActivationPhrases(text));
       },
       onTranscriptionComplete: async (result) => {
         if (getSettings().pauseMediaOnDictation) {
@@ -120,7 +121,9 @@ export const useAudioRecording = (toast, options = {}) => {
         }
 
         if (result.success) {
-          const transcribedText = result.text?.trim();
+          const outputText = stripActivationPhrases(result.text ?? "");
+          const rawOutputText = stripActivationPhrases(result.rawText ?? result.text ?? "");
+          const transcribedText = outputText.trim();
 
           if (!transcribedText) {
             window.electronAPI?.hideDictationPreview?.();
@@ -132,15 +135,15 @@ export const useAudioRecording = (toast, options = {}) => {
             return;
           }
 
-          setTranscript(result.text);
-          window.electronAPI?.completeDictationPreview?.({ text: result.text });
+          setTranscript(outputText);
+          window.electronAPI?.completeDictationPreview?.({ text: outputText });
 
           const isStreaming = result.source?.includes("streaming");
           const { autoPasteEnabled, keepTranscriptionInClipboard } = getSettings();
 
           if (autoPasteEnabled) {
             const pasteStart = performance.now();
-            await audioManagerRef.current.safePaste(result.text, {
+            await audioManagerRef.current.safePaste(outputText, {
               ...(isStreaming ? { fromStreaming: true } : {}),
               restoreClipboard: !keepTranscriptionInClipboard,
               allowClipboardFallback: isAccessibilitySkipped(),
@@ -150,15 +153,15 @@ export const useAudioRecording = (toast, options = {}) => {
               {
                 pasteMs: Math.round(performance.now() - pasteStart),
                 source: result.source,
-                textLength: result.text.length,
+                textLength: outputText.length,
               },
               "streaming"
             );
           } else if (keepTranscriptionInClipboard) {
-            await navigator.clipboard.writeText(result.text);
+            await navigator.clipboard.writeText(outputText);
           }
 
-          audioManagerRef.current.saveTranscription(result.text, result.rawText ?? result.text, {
+          audioManagerRef.current.saveTranscription(outputText, rawOutputText, {
             clientTranscriptionId: result.clientTranscriptionId,
           });
 
